@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta
+  name="viewport"
+  content="width=device-width,initial-scale=1.0"
+/>
+<title>
+نظام المسح المباشر للتظليل
+</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+body{
+  margin:0;
+  font-family:Tahoma;
+  background:#0f172a;
+  color:white;
+}
+header{
+  background:#1e40af;
+  padding:18px;
+  text-align:center;
+  font-size:28px;
+  font-weight:bold;
+}
+.container{
+  max-width:1200px;
+  margin:auto;
+  padding:20px;
+}
+.buttons{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:15px;
+}
+button{
+  border:none;
+  border-radius:12px;
+  padding:14px 22px;
+  cursor:pointer;
+  background:#2563eb;
+  color:white;
+  font-size:18px;
+  font-weight:bold;
+}
+.green{
+  background:#16a34a;
+}
+.red{
+  background:#dc2626;
+}
+.cameraBox{
+  position:relative;
+  border-radius:18px;
+  overflow:hidden;
+  border:4px solid #2563eb;
+  background:black;
+}
+video{
+  width:100%;
+  display:block;
+  background:black;
+}
+canvas{
+  width:100%;
+  margin-top:15px;
+  border-radius:18px;
+  border:3px solid #2563eb;
+  background:white;
+}
+.guide{
+  position:absolute;
+  top:4%;
+  left:4%;
+  width:92%;
+  height:92%;
+  border:5px dashed #22c55e;
+  border-radius:18px;
+  pointer-events:none;
+  box-sizing:border-box;
+}
+.summary{
+  margin-top:15px;
+  background:#111827;
+  border-radius:14px;
+  padding:15px;
+  border:1px solid #374151;
+  line-height:2;
+  font-size:18px;
+}
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+th,td{
+  border:1px solid #374151;
+  padding:10px;
+  text-align:center;
+}
+th{
+  background:#1e40af;
+}
+.ok{
+  color:#22c55e;
+  font-weight:bold;
+}
+.bad{
+  color:#ef4444;
+  font-weight:bold;
+}
+input{
+  display:none;
+}
+@media(max-width:800px){
+  button{
+    width:100%;
+  }
+  header{
+    font-size:22px;
+  }
+}
+</style>
+</head>
+<body>
+<header>
+نظام المسح المباشر للتظليل
+</header>
+<div class="container">
+<div class="buttons">
+<button onclick="startCamera()">
+تشغيل الكاميرا المباشرة
+</button>
+<button
+  class="green"
+  onclick="captureFrame()">
+مسح مباشر
+</button>
+<button
+  class="red"
+  onclick="openScanFile()">
+رفع PDF أو صورة
+</button>
+</div>
+<input
+  id="scanFile"
+  type="file"
+  accept="application/pdf,image/*"
+  onchange="loadScanFile(event)"
+/>
+<div class="cameraBox">
+<video
+  id="video"
+  autoplay
+  playsinline
+  muted>
+</video>
+<div class="guide"></div>
+</div>
+<canvas id="canvas"></canvas>
+<div
+  id="summary"
+  class="summary"
+  style="display:none">
+</div>
+</div>
+<script>
+let stream=null;
+let currentImageLoaded=false;
+/* =====================================
+   تشغيل الكاميرا
+===================================== */
+async function startCamera(){
+  try{
+    stream=await navigator
+      .mediaDevices
+      .getUserMedia({
+        video:{
+          facingMode:{
+            ideal:'environment'
+          },
+          width:{
+            ideal:1920
+          },
+          height:{
+            ideal:1080
+          }
+        },
+        audio:false
+      });
+    const video=
+      document.getElementById(
+        'video'
+      );
+    video.srcObject=stream;
+    await video.play();
+  }catch(err){
+    alert(
+      'فشل تشغيل الكاميرا\n\n' +
+      err.message
+    );
+    console.log(err);
+  }
+}
+/* =====================================
+   التقاط مباشر
+===================================== */
+function captureFrame(){
+  const video=
+    document.getElementById(
+      'video'
+    );
+  if(!video.videoWidth){
+    alert(
+      'شغل الكاميرا أولًا'
+    );
+    return;
+  }
+  const canvas=
+    document.getElementById(
+      'canvas'
+    );
+  const ctx=
+    canvas.getContext('2d');
+  canvas.width=
+    video.videoWidth;
+  canvas.height=
+    video.videoHeight;
+  ctx.drawImage(
+    video,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+  currentImageLoaded=true;
+  analyzePaper();
+}
+/* =====================================
+   فتح PDF أو صورة
+===================================== */
+function openScanFile(){
+  document
+    .getElementById(
+      'scanFile'
+    )
+    .click();
+}
+/* =====================================
+   تحميل الملف
+===================================== */
+async function loadScanFile(event){
+  const file=
+    event.target.files[0];
+  if(!file) return;
+  if(
+    file.type==='application/pdf'
+  ){
+    await renderPdf(file);
+  }else{
+    await renderImage(file);
+  }
+  analyzePaper();
+}
+/* =====================================
+   رسم صورة
+===================================== */
+function renderImage(file){
+  return new Promise(resolve=>{
+    const reader=
+      new FileReader();
+    reader.onload=function(e){
+      const img=new Image();
+      img.onload=function(){
+        const canvas=
+          document.getElementById(
+            'canvas'
+          );
+        const ctx=
+          canvas.getContext('2d');
+        canvas.width=img.width;
+        canvas.height=img.height;
+        ctx.drawImage(
+          img,
+          0,
+          0
+        );
+        currentImageLoaded=true;
+        resolve();
+      };
+      img.src=e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+/* =====================================
+   رسم PDF
+===================================== */
+async function renderPdf(file){
+  const arrayBuffer=
+    await file.arrayBuffer();
+  const pdf=
+    await pdfjsLib.getDocument({
+      data:arrayBuffer
+    }).promise;
+  const page=
+    await pdf.getPage(1);
+  const viewport=
+    page.getViewport({
+      scale:2
+    });
+  const canvas=
+    document.getElementById(
+      'canvas'
+    );
+  const ctx=
+    canvas.getContext('2d');
+  canvas.width=
+    viewport.width;
+  canvas.height=
+    viewport.height;
+  await page.render({
+    canvasContext:ctx,
+    viewport:viewport
+  }).promise;
+  currentImageLoaded=true;
+}
+/* =====================================
+   تحليل التظليل
+===================================== */
+function analyzePaper(){
+  if(!currentImageLoaded){
+    alert(
+      'لا توجد ورقة'
+    );
+    return;
+  }
+  const canvas=
+    document.getElementById(
+      'canvas'
+    );
+  const ctx=
+    canvas.getContext('2d');
+  const w=canvas.width;
+  const h=canvas.height;
+  const mcq=
+    scanSection(ctx,w,h,{
+      count:20,
+      xFirst:0.87,
+      yFirst:0.08,
+      rowGap:0.026,
+      optionGap:-0.043,
+      options:4
+    });
+  const tf=
+    scanSection(ctx,w,h,{
+      count:10,
+      xFirst:0.66,
+      yFirst:0.08,
+      rowGap:0.026,
+      optionGap:-0.055,
+      options:2
+    });
+  const match=
+    scanSection(ctx,w,h,{
+      count:5,
+      xFirst:0.54,
+      yFirst:0.36,
+      rowGap:0.036,
+      optionGap:-0.043,
+      options:10
+    });
+  showSummary(
+    mcq,
+    tf,
+    match
+  );
+}
+/* =====================================
+   فحص قسم
+===================================== */
+function scanSection(
+  ctx,
+  w,
+  h,
+  cfg
+){
+  let completed=0;
+  let missing=0;
+  let multiple=0;
+  for(
+    let q=0;
+    q<cfg.count;
+    q++
+  ){
+    const filled=[];
+    for(
+      let o=0;
+      o<cfg.options;
+      o++
+    ){
+      const cx=
+        w*(
+          cfg.xFirst+
+          (o*cfg.optionGap)
+        );
+      const cy=
+        h*(
+          cfg.yFirst+
+          (q*cfg.rowGap)
+        );
+      const dark=
+        getDarkPercent(
+          ctx,
+          cx,
+          cy,
+          12
+        );
+      if(dark>22){
+        filled.push({
+          x:cx,
+          y:cy
+        });
+      }
+    }
+    const rowY=
+      h*(
+        cfg.yFirst+
+        (q*cfg.rowGap)
+      );
+    if(filled.length===1){
+      completed++;
+      drawCheck(
+        ctx,
+        filled[0].x,
+        filled[0].y
+      );
+    }else{
+      if(
+        filled.length===0
+      ){
+        missing++;
+      }else{
+        multiple++;
+      }
+      drawRedBox(
+        ctx,
+        w*(
+          cfg.xFirst+
+          (
+            (cfg.options-1)*
+            cfg.optionGap
+          )
+        )-18,
+        rowY-16,
+        Math.abs(
+          w*
+          cfg.optionGap*
+          cfg.options
+        )+38,
+        32
+      );
+    }
+  }
+  return{
+    completed,
+    missing,
+    multiple
+  };
+}
+/* =====================================
+   نسبة السواد
+===================================== */
+function getDarkPercent(
+  ctx,
+  cx,
+  cy,
+  r
+){
+  const img=
+    ctx.getImageData(
+      cx-r,
+      cy-r,
+      r*2,
+      r*2
+    );
+  let dark=0;
+  let total=0;
+  for(
+    let i=0;
+    i<img.data.length;
+    i+=4
+  ){
+    const avg=
+      (
+        img.data[i]+
+        img.data[i+1]+
+        img.data[i+2]
+      )/3;
+    total++;
+    if(avg<115){
+      dark++;
+    }
+  }
+  return(
+    dark/total
+  )*100;
+}
+/* =====================================
+   رسم صح
+===================================== */
+function drawCheck(
+  ctx,
+  x,
+  y
+){
+  ctx.save();
+  ctx.strokeStyle='#22c55e';
+  ctx.lineWidth=6;
+  ctx.beginPath();
+  ctx.moveTo(
+    x-12,
+    y
+  );
+  ctx.lineTo(
+    x-3,
+    y+10
+  );
+  ctx.lineTo(
+    x+15,
+    y-13
+  );
+  ctx.stroke();
+  ctx.restore();
+}
+/* =====================================
+   رسم أحمر
+===================================== */
+function drawRedBox(
+  ctx,
+  x,
+  y,
+  width,
+  height
+){
+  ctx.save();
+  ctx.fillStyle=
+    'rgba(239,68,68,0.35)';
+  ctx.strokeStyle=
+    '#ef4444';
+  ctx.lineWidth=4;
+  ctx.fillRect(
+    x,
+    y,
+    width,
+    height
+  );
+  ctx.strokeRect(
+    x,
+    y,
+    width,
+    height
+  );
+  ctx.restore();
+}
+/* =====================================
+   ملخص النتائج
+===================================== */
+function showSummary(
+  mcq,
+  tf,
+  match
+){
+  const summary=
+    document.getElementById(
+      'summary'
+    );
+  summary.style.display='block';
+  summary.innerHTML=`
+    <table>
+      <tr>
+        <th>القسم</th>
+        <th>مكتمل</th>
+        <th>ناقص</th>
+        <th>متعدد</th>
+      </tr>
+      <tr>
+        <td>اختياري</td>
+        <td class="ok">
+          ${mcq.completed}
+        </td>
+        <td class="bad">
+          ${mcq.missing}
+        </td>
+        <td class="bad">
+          ${mcq.multiple}
+        </td>
+      </tr>
+      <tr>
+        <td>صح وخطأ</td>
+        <td class="ok">
+          ${tf.completed}
+        </td>
+        <td class="bad">
+          ${tf.missing}
+        </td>
+        <td class="bad">
+          ${tf.multiple}
+        </td>
+      </tr>
+      <tr>
+        <td>مزاوجة</td>
+        <td class="ok">
+          ${match.completed}
+        </td>
+        <td class="bad">
+          ${match.missing}
+        </td>
+        <td class="bad">
+          ${match.multiple}
+        </td>
+      </tr>
+    </table>
+  `;
+}
+</script>
+</body>
+</html>
