@@ -91,7 +91,6 @@ function stopCamera(){
     stream = null;
   }
 }
-
 function captureAndSend(){
   const video = document.getElementById('video');
 
@@ -103,16 +102,22 @@ function captureAndSend(){
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
 
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  const targetWidth = 900;
+  const targetHeight = Math.round(targetWidth * 297 / 210);
 
-  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
 
-  const dataUrl = canvas.toDataURL('image/jpeg',0.85);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.60);
+
+  document.getElementById('scanImageInput').value = '';
   document.getElementById('scanImageInput').value = dataUrl;
+
   document.getElementById('sendForm').submit();
 }
+
 
 startCamera();
 </script>
