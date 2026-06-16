@@ -3,56 +3,48 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>المسح المباشر للتظليل</title>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script async src="https://docs.opencv.org/4.x/opencv.js"></script>
+<title>مسح الصفحة</title>
 
 <style>
-body{margin:0;font-family:Tahoma;background:#0f172a;color:white}
-header{background:#1e40af;text-align:center;padding:18px;font-size:24px;font-weight:bold}
-.container{max-width:1200px;margin:auto;padding:16px}
-.card{background:#111827;border:1px solid #374151;border-radius:16px;padding:15px;margin-bottom:15px}
-button{border:none;border-radius:12px;padding:13px 18px;background:#2563eb;color:white;font-size:17px;font-weight:bold;cursor:pointer}
+body{margin:0;font-family:Tahoma;background:#0f172a;color:white;text-align:center}
+header{background:#1e40af;padding:18px;font-size:24px;font-weight:bold}
+.container{padding:15px;max-width:900px;margin:auto}
+button{border:none;border-radius:12px;padding:14px 20px;background:#2563eb;color:white;font-size:18px;font-weight:bold;width:100%;margin:7px 0}
 .green{background:#16a34a}.red{background:#dc2626}
-.cameraBox{position:relative;border:4px solid #2563eb;border-radius:18px;overflow:hidden;background:#000}
+.cameraBox{position:relative;border:4px solid #2563eb;border-radius:18px;overflow:hidden;background:#000;margin-top:12px}
 video{width:100%;display:block;background:#000}
-.guide{position:absolute;top:4%;left:4%;width:92%;height:92%;border:5px dashed #22c55e;border-radius:18px;pointer-events:none;box-sizing:border-box}
-canvas{width:100%;margin-top:15px;border:3px solid #2563eb;border-radius:18px;background:white}
-table{width:100%;border-collapse:collapse;margin-top:12px}
-th,td{border:1px solid #374151;padding:10px;text-align:center}
-th{background:#1e40af}.ok{color:#22c55e;font-weight:bold}.bad{color:#ef4444;font-weight:bold}
-.status{background:#020617;border:1px solid #334155;border-radius:12px;padding:12px;line-height:2;margin-top:12px}
-@media(max-width:800px){button{width:100%;margin-bottom:8px}}
+.a4Frame{position:absolute;top:50%;left:50%;height:88%;aspect-ratio:210/297;transform:translate(-50%,-50%);border:5px dashed #22c55e;border-radius:8px;pointer-events:none;box-sizing:border-box}
+canvas{display:none}
+.note{background:#111827;border:1px solid #374151;padding:12px;border-radius:12px;line-height:1.8;margin-bottom:10px}
 </style>
 </head>
 
 <body>
 
-<header>المسح المباشر للتظليل</header>
+<header>مسح الصفحة A4</header>
 
 <div class="container">
 
-  <div class="card">
-    <div id="examInfo" class="status">جاري تحميل بيانات النموذج...</div>
+  <div class="note">
+    ضع الورقة كاملة داخل إطار A4 ثم اضغط مسح الصفحة.
   </div>
 
-  <div class="card">
-    <button onclick="startCamera()">تشغيل الكاميرا</button>
-    <button class="green" onclick="captureAndAnalyze()">مسح مباشر وفحص</button>
-    <button class="red" onclick="stopCamera()">إيقاف الكاميرا</button>
+  <button onclick="startCamera()">تشغيل الكاميرا</button>
+  <button class="green" onclick="captureAndSend()">مسح الصفحة والرجوع للسكريبت</button>
+  <button class="red" onclick="stopCamera()">إيقاف الكاميرا</button>
 
-    <div class="cameraBox">
-      <video id="video" autoplay playsinline muted></video>
-      <div class="guide"></div>
-    </div>
-
-    <canvas id="canvas"></canvas>
-    <canvas id="modelCanvas" style="display:none"></canvas>
-    <canvas id="warpedCanvas" style="display:none"></canvas>
-
-    <div id="summary" class="status" style="display:none"></div>
+  <div class="cameraBox">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="a4Frame"></div>
   </div>
+
+  <canvas id="canvas"></canvas>
+
+  <form id="sendForm" method="POST" style="display:none">
+    <input name="action" value="uploadScan">
+    <input id="examIdInput" name="examId">
+    <input id="scanImageInput" name="scanImage">
+  </form>
 
 </div>
 
@@ -61,97 +53,18 @@ const params = new URLSearchParams(location.search);
 const API_URL = params.get('api');
 const EXAM_ID = params.get('examId');
 
-let currentExam = null;
 let stream = null;
-let modelReady = false;
-let modelWidth = 1200;
-let modelHeight = 1697;
 
-function jsonp(url){
-  return new Promise((resolve,reject)=>{
-    const cb = 'cb_' + Math.random().toString(36).slice(2);
-    window[cb] = data => {
-      delete window[cb];
-      script.remove();
-      resolve(data);
-    };
-
-    const script = document.createElement('script');
-    script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cb;
-    script.onerror = reject;
-    document.body.appendChild(script);
-  });
-}
-
-async function init(){
-  if(!API_URL || !EXAM_ID){
-    document.getElementById('examInfo').innerHTML = 'الرابط غير مكتمل.';
-    return;
-  }
-
-  currentExam = await jsonp(API_URL + '?action=getExam&id=' + encodeURIComponent(EXAM_ID));
-
-  if(!currentExam){
-    document.getElementById('examInfo').innerHTML = 'لم يتم العثور على النموذج.';
-    return;
-  }
-
-  document.getElementById('examInfo').innerHTML = `
-    المادة: ${currentExam.subject}<br>
-    الصف: ${currentExam.grade}<br>
-    الاختياري: ${currentExam.mcqCount}<br>
-    الصح والخطأ: ${currentExam.tfCount}<br>
-    المزاوجة: ${currentExam.matchCount}<br>
-    حالة OpenCV: جاري التحميل...
-  `;
-
-  await loadModelPdf();
-
-  document.getElementById('examInfo').innerHTML += `<br>النموذج PDF: تم تحميله`;
-}
-
-async function loadModelPdf(){
-  if(!currentExam.modelFileId) return;
-
-  const res = await jsonp(
-    API_URL +
-    '?action=getModelFileBase64&fileId=' +
-    encodeURIComponent(currentExam.modelFileId)
-  );
-
-  if(!res.ok) return;
-
-  const base64 = res.base64.split(',')[1];
-  const binary = atob(base64);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-
-  for(let i=0;i<len;i++){
-    bytes[i] = binary.charCodeAt(i);
-  }
-
-  const pdf = await pdfjsLib.getDocument({data:bytes}).promise;
-  const page = await pdf.getPage(1);
-  const viewport = page.getViewport({scale:2});
-
-  const canvas = document.getElementById('modelCanvas');
-  const ctx = canvas.getContext('2d');
-
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-
-  await page.render({
-    canvasContext:ctx,
-    viewport:viewport
-  }).promise;
-
-  modelWidth = canvas.width;
-  modelHeight = canvas.height;
-  modelReady = true;
-}
+document.getElementById('sendForm').action = API_URL || '';
+document.getElementById('examIdInput').value = EXAM_ID || '';
 
 async function startCamera(){
   try{
+    if(!API_URL || !EXAM_ID){
+      alert('رابط المسح غير مكتمل. افتح المسح من صفحة المشرف.');
+      return;
+    }
+
     stream = await navigator.mediaDevices.getUserMedia({
       audio:false,
       video:{
@@ -165,7 +78,6 @@ async function startCamera(){
     video.srcObject = stream;
     video.setAttribute('playsinline',true);
     video.muted = true;
-
     await video.play();
 
   }catch(err){
@@ -180,16 +92,11 @@ function stopCamera(){
   }
 }
 
-function captureAndAnalyze(){
-  if(!currentExam){
-    alert('لم يتم تحميل بيانات النموذج');
-    return;
-  }
-
+function captureAndSend(){
   const video = document.getElementById('video');
 
   if(!video.videoWidth){
-    alert('شغل الكاميرا أولًا');
+    alert('شغل الكاميرا أولًا.');
     return;
   }
 
@@ -201,298 +108,13 @@ function captureAndAnalyze(){
 
   ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
-  let finalCanvas = canvas;
+  const dataUrl = canvas.toDataURL('image/jpeg',0.85);
 
-  if(typeof cv !== 'undefined' && cv.Mat){
-    finalCanvas = warpDocument(canvas);
-  }
-
-  const finalCtx = finalCanvas.getContext('2d');
-  const result = analyzePaper(finalCtx, finalCanvas.width, finalCanvas.height);
-
-  const displayCtx = canvas.getContext('2d');
-  displayCtx.drawImage(finalCanvas,0,0,canvas.width,canvas.height);
-
-  showSummary(result);
-  saveResult(result);
+  document.getElementById('scanImageInput').value = dataUrl;
+  document.getElementById('sendForm').submit();
 }
 
-function warpDocument(inputCanvas){
-  const src = cv.imread(inputCanvas);
-  let gray = new cv.Mat();
-  let blur = new cv.Mat();
-  let edges = new cv.Mat();
-
-  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-  cv.GaussianBlur(gray, blur, new cv.Size(5,5), 0);
-  cv.Canny(blur, edges, 50, 150);
-
-  let contours = new cv.MatVector();
-  let hierarchy = new cv.Mat();
-
-  cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-  let maxArea = 0;
-  let best = null;
-
-  for(let i=0;i<contours.size();i++){
-    let cnt = contours.get(i);
-    let peri = cv.arcLength(cnt,true);
-    let approx = new cv.Mat();
-    cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
-
-    if(approx.rows === 4){
-      let area = cv.contourArea(approx);
-      if(area > maxArea){
-        maxArea = area;
-        if(best) best.delete();
-        best = approx;
-      }else{
-        approx.delete();
-      }
-    }
-    cnt.delete();
-  }
-
-  const output = document.getElementById('warpedCanvas');
-  output.width = modelWidth;
-  output.height = modelHeight;
-
-  if(!best){
-    const ctx = output.getContext('2d');
-    ctx.drawImage(inputCanvas,0,0,output.width,output.height);
-    cleanup();
-    return output;
-  }
-
-  const pts = [];
-  for(let i=0;i<4;i++){
-    pts.push({
-      x:best.intPtr(i,0)[0],
-      y:best.intPtr(i,0)[1]
-    });
-  }
-
-  const ordered = orderPoints(pts);
-
-  const srcTri = cv.matFromArray(4,1,cv.CV_32FC2,[
-    ordered[0].x,ordered[0].y,
-    ordered[1].x,ordered[1].y,
-    ordered[2].x,ordered[2].y,
-    ordered[3].x,ordered[3].y
-  ]);
-
-  const dstTri = cv.matFromArray(4,1,cv.CV_32FC2,[
-    0,0,
-    output.width,0,
-    output.width,output.height,
-    0,output.height
-  ]);
-
-  let M = cv.getPerspectiveTransform(srcTri,dstTri);
-  let dst = new cv.Mat();
-
-  cv.warpPerspective(src,dst,M,new cv.Size(output.width,output.height));
-
-  cv.imshow(output,dst);
-
-  srcTri.delete();
-  dstTri.delete();
-  M.delete();
-  dst.delete();
-  if(best) best.delete();
-  cleanup();
-
-  return output;
-
-  function cleanup(){
-    src.delete();
-    gray.delete();
-    blur.delete();
-    edges.delete();
-    contours.delete();
-    hierarchy.delete();
-  }
-}
-
-function orderPoints(pts){
-  pts.sort((a,b)=>a.y-b.y);
-  const top = pts.slice(0,2).sort((a,b)=>a.x-b.x);
-  const bottom = pts.slice(2,4).sort((a,b)=>a.x-b.x);
-  return [top[0],top[1],bottom[1],bottom[0]];
-}
-
-function analyzePaper(ctx,w,h){
-  const mcq = scanSection(ctx,w,h,{
-    count:Number(currentExam.mcqCount || 0),
-    xFirst:0.865,
-    yFirst:0.075,
-    rowGap:0.0262,
-    optionGap:-0.0435,
-    options:4
-  });
-
-  const tf = scanSection(ctx,w,h,{
-    count:Number(currentExam.tfCount || 0),
-    xFirst:0.665,
-    yFirst:0.075,
-    rowGap:0.0262,
-    optionGap:-0.052,
-    options:2
-  });
-
-  const match = scanSection(ctx,w,h,{
-    count:Number(currentExam.matchCount || 0),
-    xFirst:0.535,
-    yFirst:0.355,
-    rowGap:0.036,
-    optionGap:-0.043,
-    options:10
-  });
-
-  return {mcq,tf,match};
-}
-
-function scanSection(ctx,w,h,cfg){
-  let completed=0, missing=0, multiple=0;
-  const radius = Math.max(10, Math.round(w * 0.009));
-
-  for(let q=0;q<cfg.count;q++){
-    const filled=[];
-
-    for(let o=0;o<cfg.options;o++){
-      const cx = w * (cfg.xFirst + o * cfg.optionGap);
-      const cy = h * (cfg.yFirst + q * cfg.rowGap);
-
-      const dark = getDarkPercent(ctx,cx,cy,radius);
-
-      if(dark > 22) filled.push({x:cx,y:cy});
-
-      drawCircle(ctx,cx,cy,radius);
-    }
-
-    const rowY = h * (cfg.yFirst + q * cfg.rowGap);
-    const boxX = w * (cfg.xFirst + ((cfg.options - 1) * cfg.optionGap)) - 18;
-    const boxW = Math.abs(w * cfg.optionGap * cfg.options) + 38;
-
-    if(filled.length === 1){
-      completed++;
-      drawCheck(ctx,filled[0].x,filled[0].y);
-    }else{
-      if(filled.length === 0) missing++;
-      else multiple++;
-
-      drawRedBox(ctx,boxX,rowY-16,boxW,32);
-    }
-  }
-
-  return {completed,missing,multiple};
-}
-
-function getDarkPercent(ctx,cx,cy,r){
-  const x = Math.max(0,Math.floor(cx-r));
-  const y = Math.max(0,Math.floor(cy-r));
-  const size = Math.floor(r*2);
-
-  const img = ctx.getImageData(x,y,size,size);
-
-  let dark=0,total=0;
-
-  for(let i=0;i<img.data.length;i+=4){
-    const avg = (img.data[i]+img.data[i+1]+img.data[i+2])/3;
-    total++;
-    if(avg < 115) dark++;
-  }
-
-  return (dark/total)*100;
-}
-
-function drawCheck(ctx,x,y){
-  ctx.save();
-  ctx.strokeStyle='#22c55e';
-  ctx.lineWidth=6;
-  ctx.beginPath();
-  ctx.moveTo(x-12,y);
-  ctx.lineTo(x-3,y+10);
-  ctx.lineTo(x+15,y-13);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawRedBox(ctx,x,y,w,h){
-  ctx.save();
-  ctx.fillStyle='rgba(239,68,68,.35)';
-  ctx.strokeStyle='#ef4444';
-  ctx.lineWidth=4;
-  ctx.fillRect(x,y,w,h);
-  ctx.strokeRect(x,y,w,h);
-  ctx.restore();
-}
-
-function drawCircle(ctx,x,y,r){
-  ctx.save();
-  ctx.strokeStyle='rgba(59,130,246,.35)';
-  ctx.lineWidth=1;
-  ctx.beginPath();
-  ctx.arc(x,y,r,0,Math.PI*2);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function showSummary(result){
-  const box = document.getElementById('summary');
-  box.style.display = 'block';
-
-  box.innerHTML = `
-  <strong>ملخص الفحص</strong>
-  <table>
-    <tr>
-      <th>القسم</th>
-      <th>مكتمل</th>
-      <th>ناقص</th>
-      <th>متعدد</th>
-    </tr>
-    <tr>
-      <td>اختياري</td>
-      <td class="ok">${result.mcq.completed}</td>
-      <td class="bad">${result.mcq.missing}</td>
-      <td class="bad">${result.mcq.multiple}</td>
-    </tr>
-    <tr>
-      <td>صح وخطأ</td>
-      <td class="ok">${result.tf.completed}</td>
-      <td class="bad">${result.tf.missing}</td>
-      <td class="bad">${result.tf.multiple}</td>
-    </tr>
-    <tr>
-      <td>مزاوجة</td>
-      <td class="ok">${result.match.completed}</td>
-      <td class="bad">${result.match.missing}</td>
-      <td class="bad">${result.match.multiple}</td>
-    </tr>
-  </table>`;
-}
-
-async function saveResult(result){
-  const url =
-    API_URL +
-    '?action=saveScanResult' +
-    '&subject=' + encodeURIComponent(currentExam.subject) +
-    '&grade=' + encodeURIComponent(currentExam.grade) +
-    '&mcqCompleted=' + result.mcq.completed +
-    '&mcqMissing=' + result.mcq.missing +
-    '&mcqMultiple=' + result.mcq.multiple +
-    '&tfCompleted=' + result.tf.completed +
-    '&tfMissing=' + result.tf.missing +
-    '&tfMultiple=' + result.tf.multiple +
-    '&matchCompleted=' + result.match.completed +
-    '&matchMissing=' + result.match.missing +
-    '&matchMultiple=' + result.match.multiple;
-
-  jsonp(url).catch(()=>{});
-}
-
-init();
+startCamera();
 </script>
 
 </body>
