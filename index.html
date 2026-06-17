@@ -3,121 +3,191 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>مسح الصفحة</title>
+
+<title>المسح المباشر</title>
 
 <style>
-body{margin:0;font-family:Tahoma;background:#0f172a;color:white;text-align:center}
-header{background:#1e40af;padding:18px;font-size:24px;font-weight:bold}
-.container{padding:15px;max-width:900px;margin:auto}
-button{border:none;border-radius:12px;padding:14px 20px;background:#2563eb;color:white;font-size:18px;font-weight:bold;width:100%;margin:7px 0}
-.green{background:#16a34a}.red{background:#dc2626}
-.cameraBox{position:relative;border:4px solid #2563eb;border-radius:18px;overflow:hidden;background:#000;margin-top:12px}
-video{width:100%;display:block;background:#000}
-.a4Frame{position:absolute;top:50%;left:50%;height:88%;aspect-ratio:210/297;transform:translate(-50%,-50%);border:5px dashed #22c55e;border-radius:8px;pointer-events:none;box-sizing:border-box}
-canvas{display:none}
-.note{background:#111827;border:1px solid #374151;padding:12px;border-radius:12px;line-height:1.8;margin-bottom:10px}
+body{
+  margin:0;
+  font-family:Tahoma,Arial;
+  background:#f1f5f9;
+}
+
+.header{
+  background:#1e40af;
+  color:white;
+  text-align:center;
+  padding:15px;
+  font-size:24px;
+  font-weight:bold;
+}
+
+.container{
+  max-width:1000px;
+  margin:20px auto;
+  padding:20px;
+}
+
+.cameraBox{
+  position:relative;
+  width:100%;
+  max-width:850px;
+  margin:auto;
+}
+
+video{
+  width:100%;
+  border-radius:12px;
+  background:black;
+}
+
+.a4Frame{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  width:70%;
+  aspect-ratio:210/297;
+  border:4px solid #22c55e;
+  box-shadow:0 0 0 9999px rgba(0,0,0,.35);
+  pointer-events:none;
+}
+
+.btn{
+  width:100%;
+  margin-top:15px;
+  border:none;
+  background:#16a34a;
+  color:white;
+  font-size:22px;
+  padding:15px;
+  border-radius:12px;
+  cursor:pointer;
+}
+
+canvas{
+  display:none;
+}
 </style>
 </head>
 
 <body>
 
-<header>مسح الصفحة A4</header>
+<div class="header">
+المسح المباشر للورقة
+</div>
 
 <div class="container">
 
-  <div class="note">
-    ضع الورقة كاملة داخل إطار A4 ثم اضغط مسح الصفحة.
-  </div>
+<div class="cameraBox">
 
-  <button onclick="startCamera()">تشغيل الكاميرا</button>
-  <button class="green" onclick="captureAndSend()">مسح الصفحة والرجوع للسكريبت</button>
-  <button class="red" onclick="stopCamera()">إيقاف الكاميرا</button>
+<video id="video" autoplay playsinline></video>
 
-  <div class="cameraBox">
-    <video id="video" autoplay playsinline muted></video>
-    <div class="a4Frame"></div>
-  </div>
+<div class="a4Frame"></div>
 
-  <canvas id="canvas"></canvas>
+</div>
 
-  <form id="sendForm" method="POST" style="display:none">
-    <input name="action" value="uploadScan">
-    <input id="examIdInput" name="examId">
-    <input id="scanImageInput" name="scanImage">
-  </form>
+<button class="btn" onclick="captureAndSend()">
+مسح الصفحة
+</button>
+
+<canvas id="canvas"></canvas>
+
+<form id="sendForm" method="POST">
+<input type="hidden" name="action" value="uploadScan">
+<input type="hidden" id="examIdInput" name="examId">
+<input type="hidden" id="scanImageInput" name="scanImage">
+</form>
 
 </div>
 
 <script>
 const params = new URLSearchParams(location.search);
-const API_URL = params.get('api');
-const EXAM_ID = params.get('examId');
 
-let stream = null;
+const API_URL = params.get('api') || '';
+const EXAM_ID = params.get('examId') || '';
 
-document.getElementById('sendForm').action = API_URL || '';
-document.getElementById('examIdInput').value = EXAM_ID || '';
+document.getElementById('examIdInput').value = EXAM_ID;
+document.getElementById('sendForm').action = API_URL;
 
 async function startCamera(){
-  try{
-    if(!API_URL || !EXAM_ID){
-      alert('رابط المسح غير مكتمل. افتح المسح من صفحة المشرف.');
-      return;
-    }
 
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio:false,
+  try{
+
+    const stream = await navigator.mediaDevices.getUserMedia({
       video:{
-        facingMode:{ideal:'environment'},
+        facingMode:'environment',
         width:{ideal:1920},
         height:{ideal:1080}
-      }
+      },
+      audio:false
     });
 
-    const video = document.getElementById('video');
-    video.srcObject = stream;
-    video.setAttribute('playsinline',true);
-    video.muted = true;
-    await video.play();
+    document.getElementById('video').srcObject = stream;
 
   }catch(err){
-    alert('فشل تشغيل الكاميرا: ' + err.message);
+    alert('تعذر فتح الكاميرا');
   }
 }
 
-function stopCamera(){
-  if(stream){
-    stream.getTracks().forEach(t=>t.stop());
-    stream = null;
-  }
-}
 function captureAndSend(){
+
   const video = document.getElementById('video');
 
   if(!video.videoWidth){
-    alert('شغل الكاميرا أولًا.');
+    alert('الكاميرا غير جاهزة');
     return;
   }
 
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
 
-  const targetWidth = 900;
-  const targetHeight = Math.round(targetWidth * 297 / 210);
+  canvas.width = 1240;
+  canvas.height = 1754;
 
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
 
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.60);
+  const targetRatio = 210 / 297;
+  const frameRatio = vw / vh;
 
-  document.getElementById('scanImageInput').value = '';
+  let sx = 0;
+  let sy = 0;
+  let sw = vw;
+  let sh = vh;
+
+  if(frameRatio > targetRatio){
+    sw = vh * targetRatio;
+    sx = (vw - sw) / 2;
+  }else{
+    sh = vw / targetRatio;
+    sy = (vh - sh) / 2;
+  }
+
+  ctx.drawImage(
+    video,
+    sx,
+    sy,
+    sw,
+    sh,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  const dataUrl = canvas.toDataURL(
+    'image/jpeg',
+    0.95
+  );
+
   document.getElementById('scanImageInput').value = dataUrl;
 
   document.getElementById('sendForm').submit();
 }
-
 
 startCamera();
 </script>
