@@ -3,107 +3,43 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-
 <title>المسح المباشر</title>
 
 <style>
-body{
-  margin:0;
-  font-family:Tahoma,Arial;
-  background:#f1f5f9;
-}
-
-.header{
-  background:#1e40af;
-  color:white;
-  text-align:center;
-  padding:15px;
-  font-size:24px;
-  font-weight:bold;
-}
-
-.container{
-  max-width:1000px;
-  margin:20px auto;
-  padding:20px;
-}
-
-.cameraBox{
-  position:relative;
-  width:100%;
-  max-width:850px;
-  margin:auto;
-}
-
-video{
-  width:100%;
-  border-radius:12px;
-  background:black;
-}
-
-.a4Frame{
-  position:absolute;
-  left:50%;
-  top:50%;
-  transform:translate(-50%,-50%);
-  width:70%;
-  aspect-ratio:210/297;
-  border:4px solid #22c55e;
-  box-shadow:0 0 0 9999px rgba(0,0,0,.35);
-  pointer-events:none;
-}
-
-.btn{
-  width:100%;
-  margin-top:15px;
-  border:none;
-  background:#16a34a;
-  color:white;
-  font-size:22px;
-  padding:15px;
-  border-radius:12px;
-  cursor:pointer;
-}
-
-canvas{
-  display:none;
-}
+body{margin:0;font-family:Tahoma,Arial;background:#f1f5f9}
+.header{background:#1e40af;color:white;text-align:center;padding:15px;font-size:24px;font-weight:bold}
+.container{max-width:1000px;margin:20px auto;padding:20px}
+.cameraBox{position:relative;width:100%;max-width:850px;margin:auto}
+video{width:100%;border-radius:12px;background:black}
+.a4Frame{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:70%;aspect-ratio:210/297;border:4px solid #22c55e;box-shadow:0 0 0 9999px rgba(0,0,0,.35);pointer-events:none}
+.btn{width:100%;margin-top:15px;border:none;background:#16a34a;color:white;font-size:22px;padding:15px;border-radius:12px;cursor:pointer}
+canvas{display:none}
 </style>
 </head>
 
 <body>
 
-<div class="header">
-المسح المباشر للورقة
-</div>
+<div class="header">المسح المباشر للورقة</div>
 
 <div class="container">
+  <div class="cameraBox">
+    <video id="video" autoplay playsinline></video>
+    <div class="a4Frame"></div>
+  </div>
 
-<div class="cameraBox">
+  <button class="btn" onclick="captureAndSend()">مسح الصفحة</button>
 
-<video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
 
-<div class="a4Frame"></div>
-
-</div>
-
-<button class="btn" onclick="captureAndSend()">
-مسح الصفحة
-</button>
-
-<canvas id="canvas"></canvas>
-
-<form id="sendForm" method="POST">
-<input type="hidden" name="action" value="uploadScan">
-<input type="hidden" id="examIdInput" name="examId">
-<input type="hidden" id="scanImageInput" name="scanImage">
-</form>
-
+  <form id="sendForm" method="POST">
+    <input type="hidden" name="action" value="uploadScan">
+    <input type="hidden" id="examIdInput" name="examId">
+    <input type="hidden" id="scanImageInput" name="scanImage">
+  </form>
 </div>
 
 <script>
 const params = new URLSearchParams(location.search);
-
 const API_URL = params.get('api') || '';
 const EXAM_ID = params.get('examId') || '';
 
@@ -111,9 +47,7 @@ document.getElementById('examIdInput').value = EXAM_ID;
 document.getElementById('sendForm').action = API_URL;
 
 async function startCamera(){
-
   try{
-
     const stream = await navigator.mediaDevices.getUserMedia({
       video:{
         facingMode:'environment',
@@ -126,12 +60,11 @@ async function startCamera(){
     document.getElementById('video').srcObject = stream;
 
   }catch(err){
-    alert('تعذر فتح الكاميرا');
+    alert('تعذر فتح الكاميرا. تأكد من استخدام HTTPS ومن السماح للكاميرا.');
   }
 }
 
 function captureAndSend(){
-
   const video = document.getElementById('video');
 
   if(!video.videoWidth){
@@ -145,7 +78,7 @@ function captureAndSend(){
   canvas.width = 1240;
   canvas.height = 1754;
 
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = '#fff';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
   const vw = video.videoWidth;
@@ -179,12 +112,8 @@ function captureAndSend(){
     canvas.height
   );
 
-  const dataUrl = canvas.toDataURL(
-    'image/jpeg',
-    0.95
-  );
-
-  document.getElementById('scanImageInput').value = dataUrl;
+  document.getElementById('scanImageInput').value =
+    canvas.toDataURL('image/jpeg',0.92);
 
   document.getElementById('sendForm').submit();
 }
