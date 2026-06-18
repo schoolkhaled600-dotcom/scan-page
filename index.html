@@ -9,9 +9,11 @@
 body{margin:0;font-family:Tahoma,Arial;background:#f1f5f9}
 .header{background:#1e40af;color:white;text-align:center;padding:15px;font-size:24px;font-weight:bold}
 .container{max-width:1000px;margin:20px auto;padding:20px}
-.cameraBox{position:relative;width:100%;max-width:850px;margin:auto}
-video{width:100%;border-radius:12px;background:black}
-.a4Frame{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:70%;aspect-ratio:210/297;border:4px solid #22c55e;box-shadow:0 0 0 9999px rgba(0,0,0,.35);pointer-events:none}
+.cameraBox{position:relative;width:100%;max-width:850px;margin:auto;overflow:hidden;border-radius:12px;background:black}
+video{width:100%;display:block;background:black}
+.cornerBox{position:absolute;width:52px;height:52px;border:4px solid #22c55e;z-index:3}
+.tl{top:8%;left:8%}.tr{top:8%;right:8%}.bl{bottom:8%;left:8%}.br{bottom:8%;right:8%}
+.status{margin-top:15px;background:white;border-radius:12px;padding:14px;text-align:center;font-size:18px;font-weight:bold;color:#1e40af}
 .btn{width:100%;margin-top:15px;border:none;background:#16a34a;color:white;font-size:22px;padding:15px;border-radius:12px;cursor:pointer}
 canvas{display:none}
 </style>
@@ -19,15 +21,21 @@ canvas{display:none}
 
 <body>
 
-<div class="header">المسح المباشر للورقة</div>
+<div class="header">المسح التلقائي للورقة</div>
 
 <div class="container">
   <div class="cameraBox">
     <video id="video" autoplay playsinline></video>
-    <div class="a4Frame"></div>
+
+    <div class="cornerBox tl"></div>
+    <div class="cornerBox tr"></div>
+    <div class="cornerBox bl"></div>
+    <div class="cornerBox br"></div>
   </div>
 
-  <button class="btn" onclick="captureAndSend()">مسح الصفحة</button>
+  <div class="status" id="status">وجّه الورقة حتى تدخل المربعات السوداء في زوايا الإطار</div>
+
+  <button class="btn" onclick="captureAndSend()">مسح يدوي</button>
 
   <canvas id="canvas"></canvas>
 
@@ -46,6 +54,9 @@ const EXAM_ID = params.get('examId') || '';
 document.getElementById('examIdInput').value = EXAM_ID;
 document.getElementById('sendForm').action = API_URL;
 
+let autoCaptured = false;
+let checkTimer = null;
+
 async function startCamera(){
   try{
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -59,9 +70,98 @@ async function startCamera(){
 
     document.getElementById('video').srcObject = stream;
 
+    document.getElementById('video').onloadedmetadata = function(){
+      startAutoDetection();
+    };
+
   }catch(err){
     alert('تعذر فتح الكاميرا. تأكد من استخدام HTTPS ومن السماح للكاميرا.');
   }
+}
+
+function startAutoDetection(){
+  if(checkTimer) clearInterval(checkTimer);
+
+  checkTimer = setInterval(function(){
+    if(autoCaptured) return;
+
+    const ok = detectFourBlackCorners();
+
+    if(ok){
+      document.getElementById('status').innerHTML = 'تم التعرف على زوايا الورقة... جاري المسح';
+      autoCaptured = true;
+      clearInterval(checkTimer);
+
+      setTimeout(function(){
+        captureAndSend();
+      },500);
+    }else{
+      document.getElementById('status').innerHTML = 'وجّه الورقة حتى تدخل المربعات السوداء في زوايا الإطار';
+    }
+  },450);
+}
+
+function detectFourBlackCorners(){
+  const video = document.getElementById('video');
+
+  if(!video.videoWidth) return false;
+
+  const temp = document.createElement('canvas');
+  const ctx = temp.getContext('2d');
+
+  temp.width = 640;
+  temp.height = Math.round(640 * video.videoHeight / video.videoWidth);
+
+  ctx.drawImage(video,0,0,temp.width,temp.height);
+
+  const points = [
+    {x:0.08,y:0.08},
+    {x:0.92,y:0.08},
+    {x:0.08,y:0.92},
+    {x:0.92,y:0.92}
+  ];
+
+  let found = 0;
+
+  for(let i=0;i<points.length;i++){
+    const p = points[i];
+    const cx = Math.floor(temp.width * p.x);
+    const cy = Math.floor(temp.height * p.y);
+
+    if(isBlackMarker(ctx,cx,cy,temp.width,temp.height)){
+      found++;
+    }
+  }
+
+  return found === 4;
+}
+
+function isBlackMarker(ctx,cx,cy,w,h){
+  const box = 54;
+  const x = Math.max(0,cx - box/2);
+  const y = Math.max(0,cy - box/2);
+  const size = Math.min(box,w-x,h-y);
+
+  const img = ctx.getImageData(x,y,size,size);
+
+  let dark = 0;
+  let total = 0;
+
+  for(let i=0;i<img.data.length;i+=4){
+    const r = img.data[i];
+    const g = img.data[i+1];
+    const b = img.data[i+2];
+
+    const avg = (r+g+b)/3;
+
+    total++;
+
+    if(avg < 70){
+      dark++;
+    }
+  }
+
+  return total > 0 && (dark / total) > 0.18;
 }
 
 function captureAndSend(){
