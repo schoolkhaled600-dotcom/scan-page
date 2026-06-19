@@ -6,84 +6,45 @@
 <title>المسح التلقائي للورقة</title>
 
 <style>
-body{
-  margin:0;
-  font-family:Tahoma,Arial;
-  background:#f1f5f9;
-}
-
-.header{
-  background:#1e40af;
-  color:white;
-  text-align:center;
-  padding:15px;
-  font-size:24px;
-  font-weight:bold;
-}
-
-.container{
-  max-width:1000px;
-  margin:20px auto;
-  padding:14px;
-}
-
-.cameraBox{
-  position:relative;
-  width:100%;
-  max-width:900px;
-  margin:auto;
-  overflow:hidden;
-  border-radius:14px;
-  background:black;
-}
-
-video{
-  width:100%;
-  display:block;
-  background:black;
-}
+body{margin:0;font-family:Tahoma,Arial;background:#f1f5f9}
+.header{background:#1e40af;color:white;text-align:center;padding:15px;font-size:24px;font-weight:bold}
+.container{max-width:1000px;margin:20px auto;padding:14px}
+.cameraBox{position:relative;width:100%;max-width:900px;margin:auto;overflow:hidden;border-radius:14px;background:black}
+video{width:100%;display:block;background:black}
 
 .paperGuide{
   position:absolute;
   left:50%;
   top:50%;
   transform:translate(-50%,-50%);
-  width:min(86vw,72%);
+  width:min(88vw,74%);
   aspect-ratio:210/297;
   pointer-events:none;
   z-index:3;
 }
 
-.cornerTarget{
+.barTarget{
   position:absolute;
-  width:46px;
-  height:46px;
+  left:0;
+  width:100%;
+  height:32px;
   border:4px solid #f59e0b;
-  border-radius:5px;
+  border-radius:4px;
   background:rgba(255,255,255,.08);
   box-sizing:border-box;
 }
 
-.cornerTarget.ok{
-  border-color:#22c55e;
-  background:rgba(34,197,94,.18);
-}
+.barTarget.ok{border-color:#22c55e;background:rgba(34,197,94,.18)}
+.barTarget.bad{border-color:#f59e0b;background:rgba(245,158,11,.12)}
 
-.cornerTarget.bad{
-  border-color:#f59e0b;
-  background:rgba(245,158,11,.12);
-}
-
-.tl{top:-7px;left:-7px}
-.tr{top:-7px;right:-7px}
-.bl{bottom:-7px;left:-7px}
-.br{bottom:-7px;right:-7px}
+.topBar{top:-10px}
+.bottomBar{bottom:-10px}
 
 .guideLine{
   position:absolute;
-  inset:18px;
-  border:2px dashed rgba(34,197,94,.75);
-  border-radius:4px;
+  inset:18px 0;
+  border-right:2px dashed rgba(34,197,94,.75);
+  border-left:2px dashed rgba(34,197,94,.75);
 }
 
 .status{
@@ -111,13 +72,8 @@ video{
   font-weight:bold;
 }
 
-.btnStop{
-  background:#dc2626;
-}
-
-canvas{
-  display:none;
-}
+.btnStop{background:#dc2626}
+canvas{display:none}
 
 .previewModal{
   position:fixed;
@@ -139,10 +95,7 @@ canvas{
   text-align:center;
 }
 
-.previewBox h3{
-  margin:6px 0 12px;
-  color:#111827;
-}
+.previewBox h3{margin:6px 0 12px;color:#111827}
 
 .previewImg{
   width:100%;
@@ -153,23 +106,10 @@ canvas{
   background:white;
 }
 
-.previewActions{
-  display:flex;
-  gap:10px;
-  margin-top:12px;
-}
-
-.previewActions button{
-  flex:1;
-}
-
-.btnApprove{
-  background:#16a34a;
-}
-
-.btnRetake{
-  background:#dc2626;
-}
+.previewActions{display:flex;gap:10px;margin-top:12px}
+.previewActions button{flex:1}
+.btnApprove{background:#16a34a}
+.btnRetake{background:#dc2626}
 </style>
 </head>
 
@@ -184,15 +124,13 @@ canvas{
 
     <div class="paperGuide" id="paperGuide">
       <div class="guideLine"></div>
-      <div class="cornerTarget tl" id="targetTL"></div>
-      <div class="cornerTarget tr" id="targetTR"></div>
-      <div class="cornerTarget bl" id="targetBL"></div>
-      <div class="cornerTarget br" id="targetBR"></div>
+      <div class="barTarget topBar" id="targetTop"></div>
+      <div class="barTarget bottomBar" id="targetBottom"></div>
     </div>
   </div>
 
   <div class="status" id="status">
-    وجّه الورقة حتى تدخل المربعات السوداء الأربع داخل مربعات الزوايا في نفس الوقت
+    وجّه الورقة حتى يدخل المستطيل الأسود العلوي والسفلي داخل مستطيلي المسح
   </div>
 
   <button class="btn" onclick="captureForReview()">مسح يدوي</button>
@@ -231,7 +169,7 @@ document.getElementById('sendForm').action = API_URL;
 let autoCaptured = false;
 let checkTimer = null;
 let stableCount = 0;
-let lastCorners = null;
+let lastBars = null;
 let pendingCaptureDataUrl = '';
 
 async function startCamera(){
@@ -260,13 +198,13 @@ async function startCamera(){
 function restartAutoScan(){
   autoCaptured = false;
   stableCount = 0;
-  lastCorners = null;
+  lastBars = null;
   pendingCaptureDataUrl = '';
   document.getElementById('previewModal').style.display = 'none';
   startAutoDetection();
 
   document.getElementById('status').innerHTML =
-    'وجّه الورقة حتى تدخل المربعات السوداء الأربع داخل مربعات الزوايا في نفس الوقت';
+    'وجّه الورقة حتى يدخل المستطيل الأسود العلوي والسفلي داخل مستطيلي المسح';
 }
 
 function startAutoDetection(){
@@ -275,42 +213,38 @@ function startAutoDetection(){
   checkTimer = setInterval(function(){
     if(autoCaptured) return;
 
-    const result = detectFourBlackCorners();
-
+    const result = detectTwoBlackBars();
     updateTargetUI(result);
 
     if(result.all){
       stableCount++;
-      lastCorners = result.corners;
+      lastBars = result.bars;
 
       document.getElementById('status').innerHTML =
-        'تمت مطابقة الزوايا الأربع (' + stableCount + '/3)';
+        'تمت مطابقة المستطيلين (' + stableCount + '/3)';
 
       if(stableCount >= 3){
         autoCaptured = true;
         clearInterval(checkTimer);
 
         document.getElementById('status').innerHTML =
-          'تمت مطابقة المربعات السوداء الأربع... جاري أخذ اللقطة';
+          'تمت المطابقة... جاري أخذ اللقطة';
 
         setTimeout(function(){
           captureForReview();
         },500);
       }
-
     }else{
       stableCount = 0;
       document.getElementById('status').innerHTML =
-        'لم تكتمل المطابقة بعد — أدخل كل مربع أسود داخل مربع الزاوية المقابل';
+        'لم تكتمل المطابقة — يجب دخول المستطيلين كاملين داخل مستطيلي المسح';
     }
   },350);
 }
 
 function updateTargetUI(result){
-  setTargetState('targetTL', result.tl);
-  setTargetState('targetTR', result.tr);
-  setTargetState('targetBL', result.bl);
-  setTargetState('targetBR', result.br);
+  setTargetState('targetTop', result.top);
+  setTargetState('targetBottom', result.bottom);
 }
 
 function setTargetState(id, ok){
@@ -319,18 +253,11 @@ function setTargetState(id, ok){
   el.classList.add(ok ? 'ok' : 'bad');
 }
 
-function detectFourBlackCorners(){
+function detectTwoBlackBars(){
   const video = document.getElementById('video');
 
   if(!video.videoWidth){
-    return {
-      tl:false,
-      tr:false,
-      bl:false,
-      br:false,
-      all:false,
-      corners:null
-    };
+    return {top:false,bottom:false,all:false,bars:null};
   }
 
   const detectCanvas = document.getElementById('detectCanvas');
@@ -341,62 +268,48 @@ function detectFourBlackCorners(){
 
   ctx.drawImage(video,0,0,detectCanvas.width,detectCanvas.height);
 
-  const points = getTargetCentersInVideoPixels();
+  const zones = getTargetRectsInVideoPixels();
 
-  const tl = findBlackMarkerBox(ctx,points.tl.x,points.tl.y,detectCanvas.width,detectCanvas.height);
-  const tr = findBlackMarkerBox(ctx,points.tr.x,points.tr.y,detectCanvas.width,detectCanvas.height);
-  const bl = findBlackMarkerBox(ctx,points.bl.x,points.bl.y,detectCanvas.width,detectCanvas.height);
-  const br = findBlackMarkerBox(ctx,points.br.x,points.br.y,detectCanvas.width,detectCanvas.height);
+  const top = findBlackHorizontalBar(ctx,zones.top,detectCanvas.width,detectCanvas.height);
+  const bottom = findBlackHorizontalBar(ctx,zones.bottom,detectCanvas.width,detectCanvas.height);
 
   return {
-    tl:!!tl,
-    tr:!!tr,
-    bl:!!bl,
-    br:!!br,
-    all:!!tl && !!tr && !!bl && !!br,
-    corners:{
-      tl:tl,
-      tr:tr,
-      bl:bl,
-      br:br
-    }
+    top:!!top,
+    bottom:!!bottom,
+    all:!!top && !!bottom,
+    bars:{top:top,bottom:bottom}
   };
 }
 
-function getTargetCentersInVideoPixels(){
+function getTargetRectsInVideoPixels(){
   const video = document.getElementById('video');
   const videoRect = video.getBoundingClientRect();
 
-  function centerOf(id){
+  function rectOf(id){
     const r = document.getElementById(id).getBoundingClientRect();
 
-    const cxDisplay = r.left + r.width / 2;
-    const cyDisplay = r.top + r.height / 2;
-
-    const nx = (cxDisplay - videoRect.left) / videoRect.width;
-    const ny = (cyDisplay - videoRect.top) / videoRect.height;
-
     return {
-      x: Math.round(nx * video.videoWidth),
-      y: Math.round(ny * video.videoHeight)
+      x: Math.round((r.left - videoRect.left) / videoRect.width * video.videoWidth),
+      y: Math.round((r.top - videoRect.top) / videoRect.height * video.videoHeight),
+      w: Math.round(r.width / videoRect.width * video.videoWidth),
+      h: Math.round(r.height / videoRect.height * video.videoHeight)
     };
   }
 
   return {
-    tl:centerOf('targetTL'),
-    tr:centerOf('targetTR'),
-    bl:centerOf('targetBL'),
-    br:centerOf('targetBR')
+    top: rectOf('targetTop'),
+    bottom: rectOf('targetBottom')
   };
 }
 
-function findBlackMarkerBox(ctx,cx,cy,w,h){
-  const box = 120;
+function findBlackHorizontalBar(ctx,zone,w,h){
+  const padX = Math.round(zone.w * 0.05);
+  const padY = Math.round(zone.h * 0.40);
 
-  const x0 = Math.max(0,Math.floor(cx - box/2));
-  const y0 = Math.max(0,Math.floor(cy - box/2));
-  const sw = Math.min(box,w - x0);
-  const sh = Math.min(box,h - y0);
+  const x0 = Math.max(0,zone.x - padX);
+  const y0 = Math.max(0,zone.y - padY);
+  const sw = Math.min(w - x0,zone.w + padX * 2);
+  const sh = Math.min(h - y0,zone.h + padY * 2);
 
   if(sw <= 0 || sh <= 0) return null;
 
@@ -407,8 +320,6 @@ function findBlackMarkerBox(ctx,cx,cy,w,h){
   let minY = sh;
   let maxX = 0;
   let maxY = 0;
-  let sumX = 0;
-  let sumY = 0;
 
   for(let y=0;y<sh;y++){
     for(let x=0;x<sw;x++){
@@ -419,10 +330,8 @@ function findBlackMarkerBox(ctx,cx,cy,w,h){
 
       const avg = (r + g + b) / 3;
 
-      if(avg < 70){
+      if(avg < 60){
         count++;
-        sumX += x0 + x;
-        sumY += y0 + y;
 
         if(x < minX) minX = x;
         if(y < minY) minY = y;
@@ -434,18 +343,29 @@ function findBlackMarkerBox(ctx,cx,cy,w,h){
 
   const ratio = count / (sw * sh);
 
-  if(ratio < 0.10){
-    return null;
-  }
+  if(ratio < 0.10) return null;
 
-  return {
-    x: Math.round(sumX / count),
-    y: Math.round(sumY / count),
-    left: x0 + minX,
-    right: x0 + maxX,
-    top: y0 + minY,
-    bottom: y0 + maxY
+  const bar = {
+    left:x0 + minX,
+    right:x0 + maxX,
+    top:y0 + minY,
+    bottom:y0 + maxY,
+    width:maxX - minX,
+    height:maxY - minY
   };
+
+  if(bar.width < zone.w * 0.72) return null;
+  if(bar.height < 4) return null;
+
+  const insideTarget =
+    bar.left >= zone.x &&
+    bar.right <= zone.x + zone.w &&
+    bar.top >= zone.y - 6 &&
+    bar.bottom <= zone.y + zone.h + 6;
+
+  if(!insideTarget) return null;
+
+  return bar;
 }
 
 function playCaptureSound(){
@@ -518,7 +438,7 @@ function buildCroppedCapture(){
   ctx.fillStyle = '#fff';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  const crop = getCropOutsideBlackMarkers();
+  const crop = getCropBetweenBlackBars();
 
   ctx.drawImage(
     video,
@@ -535,34 +455,20 @@ function buildCroppedCapture(){
   return canvas.toDataURL('image/jpeg',0.94);
 }
 
-function getCropOutsideBlackMarkers(){
+function getCropBetweenBlackBars(){
   const video = document.getElementById('video');
 
-  if(!lastCorners || !lastCorners.tl || !lastCorners.tr || !lastCorners.bl || !lastCorners.br){
+  if(!lastBars || !lastBars.top || !lastBars.bottom){
     return getPaperGuideCropFromVideo();
   }
 
-  const markerGap = 2;
+  const gap = 1;
 
-  const left = Math.max(
-    lastCorners.tl.right,
-    lastCorners.bl.right
-  ) + markerGap;
+  const left = Math.max(lastBars.top.left,lastBars.bottom.left);
+  const right = Math.min(lastBars.top.right,lastBars.bottom.right);
 
-  const right = Math.min(
-    lastCorners.tr.left,
-    lastCorners.br.left
-  ) - markerGap;
-
-  const top = Math.max(
-    lastCorners.tl.bottom,
-    lastCorners.tr.bottom
-  ) + markerGap;
-
-  const bottom = Math.min(
-    lastCorners.bl.top,
-    lastCorners.br.top
-  ) - markerGap;
+  const top = lastBars.top.bottom + gap;
+  const bottom = lastBars.bottom.top - gap;
 
   let sx = Math.max(0,Math.floor(left));
   let sy = Math.max(0,Math.floor(top));
@@ -573,12 +479,7 @@ function getCropOutsideBlackMarkers(){
     return getPaperGuideCropFromVideo();
   }
 
-  return {
-    sx:sx,
-    sy:sy,
-    sw:sw,
-    sh:sh
-  };
+  return {sx:sx,sy:sy,sw:sw,sh:sh};
 }
 
 function getPaperGuideCropFromVideo(){
@@ -597,12 +498,7 @@ function getPaperGuideCropFromVideo(){
   sw = Math.min(video.videoWidth - sx,Math.floor(sw));
   sh = Math.min(video.videoHeight - sy,Math.floor(sh));
 
-  return {
-    sx:sx,
-    sy:sy,
-    sw:sw,
-    sh:sh
-  };
+  return {sx:sx,sy:sy,sw:sw,sh:sh};
 }
 
 startCamera();
