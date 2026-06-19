@@ -56,10 +56,10 @@ video{
 
 .cornerTarget{
   position:absolute;
-  width:58px;
-  height:58px;
-  border:5px solid #f59e0b;
-  border-radius:6px;
+  width:46px;
+  height:46px;
+  border:4px solid #f59e0b;
+  border-radius:5px;
   background:rgba(255,255,255,.08);
   box-sizing:border-box;
 }
@@ -74,10 +74,10 @@ video{
   background:rgba(245,158,11,.12);
 }
 
-.tl{top:-10px;left:-10px}
-.tr{top:-10px;right:-10px}
-.bl{bottom:-10px;left:-10px}
-.br{bottom:-10px;right:-10px}
+.tl{top:-7px;left:-7px}
+.tr{top:-7px;right:-7px}
+.bl{bottom:-7px;left:-7px}
+.br{bottom:-7px;right:-7px}
 
 .guideLine{
   position:absolute;
@@ -118,6 +118,58 @@ video{
 canvas{
   display:none;
 }
+
+.previewModal{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.65);
+  z-index:9999;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:16px;
+}
+
+.previewBox{
+  background:white;
+  border-radius:18px;
+  padding:16px;
+  width:95%;
+  max-width:520px;
+  text-align:center;
+}
+
+.previewBox h3{
+  margin:6px 0 12px;
+  color:#111827;
+}
+
+.previewImg{
+  width:100%;
+  max-height:65vh;
+  object-fit:contain;
+  border:2px solid #1e40af;
+  border-radius:12px;
+  background:white;
+}
+
+.previewActions{
+  display:flex;
+  gap:10px;
+  margin-top:12px;
+}
+
+.previewActions button{
+  flex:1;
+}
+
+.btnApprove{
+  background:#16a34a;
+}
+
+.btnRetake{
+  background:#dc2626;
+}
 </style>
 </head>
 
@@ -143,7 +195,7 @@ canvas{
     وجّه الورقة حتى تدخل المربعات السوداء الأربع داخل مربعات الزوايا في نفس الوقت
   </div>
 
-  <button class="btn" onclick="captureAndSend()">مسح يدوي</button>
+  <button class="btn" onclick="captureForReview()">مسح يدوي</button>
   <button class="btn btnStop" onclick="restartAutoScan()">إعادة التحقق التلقائي</button>
 
   <canvas id="canvas"></canvas>
@@ -155,6 +207,17 @@ canvas{
     <input type="hidden" id="scanImageInput" name="scanImage">
   </form>
 
+</div>
+
+<div class="previewModal" id="previewModal">
+  <div class="previewBox">
+    <h3>معاينة اللقطة</h3>
+    <img id="previewImage" class="previewImg">
+    <div class="previewActions">
+      <button class="btn btnApprove" onclick="approveCapture()">اعتماد اللقطة</button>
+      <button class="btn btnRetake" onclick="retakeCapture()">إعادة اللقطة</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -169,6 +232,7 @@ let autoCaptured = false;
 let checkTimer = null;
 let stableCount = 0;
 let lastCorners = null;
+let pendingCaptureDataUrl = '';
 
 async function startCamera(){
   try{
@@ -197,6 +261,8 @@ function restartAutoScan(){
   autoCaptured = false;
   stableCount = 0;
   lastCorners = null;
+  pendingCaptureDataUrl = '';
+  document.getElementById('previewModal').style.display = 'none';
   startAutoDetection();
 
   document.getElementById('status').innerHTML =
@@ -225,10 +291,10 @@ function startAutoDetection(){
         clearInterval(checkTimer);
 
         document.getElementById('status').innerHTML =
-          'تمت مطابقة المربعات السوداء الأربع... جاري القص والمسح';
+          'تمت مطابقة المربعات السوداء الأربع... جاري أخذ اللقطة';
 
         setTimeout(function(){
-          captureAndSend();
+          captureForReview();
         },500);
       }
 
@@ -277,10 +343,10 @@ function detectFourBlackCorners(){
 
   const points = getTargetCentersInVideoPixels();
 
-  const tl = findBlackMarkerCenter(ctx,points.tl.x,points.tl.y,detectCanvas.width,detectCanvas.height);
-  const tr = findBlackMarkerCenter(ctx,points.tr.x,points.tr.y,detectCanvas.width,detectCanvas.height);
-  const bl = findBlackMarkerCenter(ctx,points.bl.x,points.bl.y,detectCanvas.width,detectCanvas.height);
-  const br = findBlackMarkerCenter(ctx,points.br.x,points.br.y,detectCanvas.width,detectCanvas.height);
+  const tl = findBlackMarkerBox(ctx,points.tl.x,points.tl.y,detectCanvas.width,detectCanvas.height);
+  const tr = findBlackMarkerBox(ctx,points.tr.x,points.tr.y,detectCanvas.width,detectCanvas.height);
+  const bl = findBlackMarkerBox(ctx,points.bl.x,points.bl.y,detectCanvas.width,detectCanvas.height);
+  const br = findBlackMarkerBox(ctx,points.br.x,points.br.y,detectCanvas.width,detectCanvas.height);
 
   return {
     tl:!!tl,
@@ -324,7 +390,7 @@ function getTargetCentersInVideoPixels(){
   };
 }
 
-function findBlackMarkerCenter(ctx,cx,cy,w,h){
+function findBlackMarkerBox(ctx,cx,cy,w,h){
   const box = 120;
 
   const x0 = Math.max(0,Math.floor(cx - box/2));
@@ -337,6 +403,10 @@ function findBlackMarkerCenter(ctx,cx,cy,w,h){
   const img = ctx.getImageData(x0,y0,sw,sh);
 
   let count = 0;
+  let minX = sw;
+  let minY = sh;
+  let maxX = 0;
+  let maxY = 0;
   let sumX = 0;
   let sumY = 0;
 
@@ -353,6 +423,11 @@ function findBlackMarkerCenter(ctx,cx,cy,w,h){
         count++;
         sumX += x0 + x;
         sumY += y0 + y;
+
+        if(x < minX) minX = x;
+        if(y < minY) minY = y;
+        if(x > maxX) maxX = x;
+        if(y > maxY) maxY = y;
       }
     }
   }
@@ -365,16 +440,73 @@ function findBlackMarkerCenter(ctx,cx,cy,w,h){
 
   return {
     x: Math.round(sumX / count),
-    y: Math.round(sumY / count)
+    y: Math.round(sumY / count),
+    left: x0 + minX,
+    right: x0 + maxX,
+    top: y0 + minY,
+    bottom: y0 + maxY
   };
 }
 
-function captureAndSend(){
+function playCaptureSound(){
+  try{
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioContext();
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.35, audioCtx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.18);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.2);
+  }catch(e){}
+}
+
+function captureForReview(){
+  const dataUrl = buildCroppedCapture();
+
+  if(!dataUrl) return;
+
+  pendingCaptureDataUrl = dataUrl;
+  playCaptureSound();
+
+  document.getElementById('previewImage').src = dataUrl;
+  document.getElementById('previewModal').style.display = 'flex';
+
+  document.getElementById('status').innerHTML =
+    'تم أخذ اللقطة — اختر اعتماد اللقطة أو إعادة اللقطة';
+}
+
+function approveCapture(){
+  if(!pendingCaptureDataUrl){
+    alert('لا توجد لقطة لاعتمادها');
+    return;
+  }
+
+  document.getElementById('scanImageInput').value = pendingCaptureDataUrl;
+  document.getElementById('sendForm').submit();
+}
+
+function retakeCapture(){
+  pendingCaptureDataUrl = '';
+  document.getElementById('previewModal').style.display = 'none';
+  restartAutoScan();
+}
+
+function buildCroppedCapture(){
   const video = document.getElementById('video');
 
   if(!video.videoWidth){
     alert('الكاميرا غير جاهزة');
-    return;
+    return '';
   }
 
   const canvas = document.getElementById('canvas');
@@ -386,7 +518,7 @@ function captureAndSend(){
   ctx.fillStyle = '#fff';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  const crop = getCropInsideBlackMarkers();
+  const crop = getCropOutsideBlackMarkers();
 
   ctx.drawImage(
     video,
@@ -400,40 +532,37 @@ function captureAndSend(){
     canvas.height
   );
 
-  document.getElementById('scanImageInput').value =
-    canvas.toDataURL('image/jpeg',0.94);
-
-  document.getElementById('sendForm').submit();
+  return canvas.toDataURL('image/jpeg',0.94);
 }
 
-function getCropInsideBlackMarkers(){
+function getCropOutsideBlackMarkers(){
   const video = document.getElementById('video');
 
   if(!lastCorners || !lastCorners.tl || !lastCorners.tr || !lastCorners.bl || !lastCorners.br){
     return getPaperGuideCropFromVideo();
   }
 
-  const margin = 12;
+  const markerGap = 2;
 
   const left = Math.max(
-    lastCorners.tl.x,
-    lastCorners.bl.x
-  ) + margin;
+    lastCorners.tl.right,
+    lastCorners.bl.right
+  ) + markerGap;
 
   const right = Math.min(
-    lastCorners.tr.x,
-    lastCorners.br.x
-  ) - margin;
+    lastCorners.tr.left,
+    lastCorners.br.left
+  ) - markerGap;
 
   const top = Math.max(
-    lastCorners.tl.y,
-    lastCorners.tr.y
-  ) + margin;
+    lastCorners.tl.bottom,
+    lastCorners.tr.bottom
+  ) + markerGap;
 
   const bottom = Math.min(
-    lastCorners.bl.y,
-    lastCorners.br.y
-  ) - margin;
+    lastCorners.bl.top,
+    lastCorners.br.top
+  ) - markerGap;
 
   let sx = Math.max(0,Math.floor(left));
   let sy = Math.max(0,Math.floor(top));
