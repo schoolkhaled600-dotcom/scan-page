@@ -3,19 +3,121 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>المسح المباشر</title>
+<title>المسح التلقائي للورقة</title>
 
 <style>
-body{margin:0;font-family:Tahoma,Arial;background:#f1f5f9}
-.header{background:#1e40af;color:white;text-align:center;padding:15px;font-size:24px;font-weight:bold}
-.container{max-width:1000px;margin:20px auto;padding:20px}
-.cameraBox{position:relative;width:100%;max-width:850px;margin:auto;overflow:hidden;border-radius:12px;background:black}
-video{width:100%;display:block;background:black}
-.cornerBox{position:absolute;width:52px;height:52px;border:4px solid #22c55e;z-index:3}
-.tl{top:8%;left:8%}.tr{top:8%;right:8%}.bl{bottom:8%;left:8%}.br{bottom:8%;right:8%}
-.status{margin-top:15px;background:white;border-radius:12px;padding:14px;text-align:center;font-size:18px;font-weight:bold;color:#1e40af}
-.btn{width:100%;margin-top:15px;border:none;background:#16a34a;color:white;font-size:22px;padding:15px;border-radius:12px;cursor:pointer}
-canvas{display:none}
+body{
+  margin:0;
+  font-family:Tahoma,Arial;
+  background:#f1f5f9;
+}
+
+.header{
+  background:#1e40af;
+  color:white;
+  text-align:center;
+  padding:15px;
+  font-size:24px;
+  font-weight:bold;
+}
+
+.container{
+  max-width:1000px;
+  margin:20px auto;
+  padding:14px;
+}
+
+.cameraBox{
+  position:relative;
+  width:100%;
+  max-width:900px;
+  margin:auto;
+  overflow:hidden;
+  border-radius:14px;
+  background:black;
+}
+
+video{
+  width:100%;
+  display:block;
+  background:black;
+}
+
+.paperGuide{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  width:min(86vw,72%);
+  aspect-ratio:210/297;
+  pointer-events:none;
+  z-index:3;
+}
+
+.cornerTarget{
+  position:absolute;
+  width:58px;
+  height:58px;
+  border:5px solid #f59e0b;
+  border-radius:6px;
+  background:rgba(255,255,255,.08);
+  box-sizing:border-box;
+}
+
+.cornerTarget.ok{
+  border-color:#22c55e;
+  background:rgba(34,197,94,.18);
+}
+
+.cornerTarget.bad{
+  border-color:#f59e0b;
+  background:rgba(245,158,11,.12);
+}
+
+.tl{top:-10px;left:-10px}
+.tr{top:-10px;right:-10px}
+.bl{bottom:-10px;left:-10px}
+.br{bottom:-10px;right:-10px}
+
+.guideLine{
+  position:absolute;
+  inset:18px;
+  border:2px dashed rgba(34,197,94,.75);
+  border-radius:4px;
+}
+
+.status{
+  margin-top:15px;
+  background:white;
+  border-radius:12px;
+  padding:14px;
+  text-align:center;
+  font-size:18px;
+  font-weight:bold;
+  color:#1e40af;
+  line-height:1.8;
+}
+
+.btn{
+  width:100%;
+  margin-top:15px;
+  border:none;
+  background:#16a34a;
+  color:white;
+  font-size:22px;
+  padding:15px;
+  border-radius:12px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+.btnStop{
+  background:#dc2626;
+}
+
+canvas{
+  display:none;
+}
 </style>
 </head>
 
@@ -24,26 +126,35 @@ canvas{display:none}
 <div class="header">المسح التلقائي للورقة</div>
 
 <div class="container">
-  <div class="cameraBox">
+
+  <div class="cameraBox" id="cameraBox">
     <video id="video" autoplay playsinline></video>
 
-    <div class="cornerBox tl"></div>
-    <div class="cornerBox tr"></div>
-    <div class="cornerBox bl"></div>
-    <div class="cornerBox br"></div>
+    <div class="paperGuide" id="paperGuide">
+      <div class="guideLine"></div>
+      <div class="cornerTarget tl" id="targetTL"></div>
+      <div class="cornerTarget tr" id="targetTR"></div>
+      <div class="cornerTarget bl" id="targetBL"></div>
+      <div class="cornerTarget br" id="targetBR"></div>
+    </div>
   </div>
 
-  <div class="status" id="status">وجّه الورقة حتى تدخل المربعات السوداء في زوايا الإطار</div>
+  <div class="status" id="status">
+    وجّه الورقة حتى تدخل المربعات السوداء الأربع داخل مربعات الزوايا في نفس الوقت
+  </div>
 
   <button class="btn" onclick="captureAndSend()">مسح يدوي</button>
+  <button class="btn btnStop" onclick="restartAutoScan()">إعادة التحقق التلقائي</button>
 
   <canvas id="canvas"></canvas>
+  <canvas id="detectCanvas"></canvas>
 
   <form id="sendForm" method="POST">
     <input type="hidden" name="action" value="uploadScan">
     <input type="hidden" id="examIdInput" name="examId">
     <input type="hidden" id="scanImageInput" name="scanImage">
   </form>
+
 </div>
 
 <script>
@@ -56,6 +167,7 @@ document.getElementById('sendForm').action = API_URL;
 
 let autoCaptured = false;
 let checkTimer = null;
+let stableCount = 0;
 
 async function startCamera(){
   try{
@@ -68,9 +180,10 @@ async function startCamera(){
       audio:false
     });
 
-    document.getElementById('video').srcObject = stream;
+    const video = document.getElementById('video');
+    video.srcObject = stream;
 
-    document.getElementById('video').onloadedmetadata = function(){
+    video.onloadedmetadata = function(){
       startAutoDetection();
     };
 
@@ -79,72 +192,135 @@ async function startCamera(){
   }
 }
 
+function restartAutoScan(){
+  autoCaptured = false;
+  stableCount = 0;
+  startAutoDetection();
+  document.getElementById('status').innerHTML =
+    'وجّه الورقة حتى تدخل المربعات السوداء الأربع داخل مربعات الزوايا في نفس الوقت';
+}
+
 function startAutoDetection(){
   if(checkTimer) clearInterval(checkTimer);
 
   checkTimer = setInterval(function(){
     if(autoCaptured) return;
 
-    const ok = detectFourBlackCorners();
+    const result = detectFourBlackCorners();
 
-    if(ok){
-      document.getElementById('status').innerHTML = 'تم التعرف على زوايا الورقة... جاري المسح';
-      autoCaptured = true;
-      clearInterval(checkTimer);
+    updateTargetUI(result);
 
-      setTimeout(function(){
-        captureAndSend();
-      },500);
+    if(result.all){
+      stableCount++;
+      document.getElementById('status').innerHTML =
+        'تمت مطابقة الزوايا الأربع (' + stableCount + '/3)';
+
+      if(stableCount >= 3){
+        autoCaptured = true;
+        clearInterval(checkTimer);
+
+        document.getElementById('status').innerHTML =
+          'تمت مطابقة المربعات السوداء الأربع... جاري المسح';
+
+        setTimeout(function(){
+          captureAndSend();
+        },500);
+      }
+
     }else{
-      document.getElementById('status').innerHTML = 'وجّه الورقة حتى تدخل المربعات السوداء في زوايا الإطار';
+      stableCount = 0;
+      document.getElementById('status').innerHTML =
+        'لم تكتمل المطابقة بعد — أدخل كل مربع أسود داخل مربع الزاوية المقابل';
     }
-  },450);
+  },350);
+}
+
+function updateTargetUI(result){
+  setTargetState('targetTL', result.tl);
+  setTargetState('targetTR', result.tr);
+  setTargetState('targetBL', result.bl);
+  setTargetState('targetBR', result.br);
+}
+
+function setTargetState(id, ok){
+  const el = document.getElementById(id);
+  el.classList.remove('ok','bad');
+  el.classList.add(ok ? 'ok' : 'bad');
 }
 
 function detectFourBlackCorners(){
   const video = document.getElementById('video');
 
-  if(!video.videoWidth) return false;
-
-  const temp = document.createElement('canvas');
-  const ctx = temp.getContext('2d');
-
-  temp.width = 640;
-  temp.height = Math.round(640 * video.videoHeight / video.videoWidth);
-
-  ctx.drawImage(video,0,0,temp.width,temp.height);
-
-  const points = [
-    {x:0.08,y:0.08},
-    {x:0.92,y:0.08},
-    {x:0.08,y:0.92},
-    {x:0.92,y:0.92}
-  ];
-
-  let found = 0;
-
-  for(let i=0;i<points.length;i++){
-    const p = points[i];
-    const cx = Math.floor(temp.width * p.x);
-    const cy = Math.floor(temp.height * p.y);
-
-    if(isBlackMarker(ctx,cx,cy,temp.width,temp.height)){
-      found++;
-    }
+  if(!video.videoWidth){
+    return {tl:false,tr:false,bl:false,br:false,all:false};
   }
 
-  return found === 4;
+  const detectCanvas = document.getElementById('detectCanvas');
+  const ctx = detectCanvas.getContext('2d');
+
+  detectCanvas.width = video.videoWidth;
+  detectCanvas.height = video.videoHeight;
+
+  ctx.drawImage(video,0,0,detectCanvas.width,detectCanvas.height);
+
+  const points = getTargetCentersInVideoPixels();
+
+  const tl = isBlackMarker(ctx,points.tl.x,points.tl.y,detectCanvas.width,detectCanvas.height);
+  const tr = isBlackMarker(ctx,points.tr.x,points.tr.y,detectCanvas.width,detectCanvas.height);
+  const bl = isBlackMarker(ctx,points.bl.x,points.bl.y,detectCanvas.width,detectCanvas.height);
+  const br = isBlackMarker(ctx,points.br.x,points.br.y,detectCanvas.width,detectCanvas.height);
+
+  return {
+    tl:tl,
+    tr:tr,
+    bl:bl,
+    br:br,
+    all:tl && tr && bl && br
+  };
+}
+
+function getTargetCentersInVideoPixels(){
+  const video = document.getElementById('video');
+  const box = document.getElementById('cameraBox');
+  const videoRect = video.getBoundingClientRect();
+
+  function centerOf(id){
+    const r = document.getElementById(id).getBoundingClientRect();
+
+    const cxDisplay = r.left + r.width / 2;
+    const cyDisplay = r.top + r.height / 2;
+
+    const nx = (cxDisplay - videoRect.left) / videoRect.width;
+    const ny = (cyDisplay - videoRect.top) / videoRect.height;
+
+    return {
+      x: Math.round(nx * video.videoWidth),
+      y: Math.round(ny * video.videoHeight)
+    };
+  }
+
+  return {
+    tl:centerOf('targetTL'),
+    tr:centerOf('targetTR'),
+    bl:centerOf('targetBL'),
+    br:centerOf('targetBR')
+  };
 }
 
 function isBlackMarker(ctx,cx,cy,w,h){
-  const box = 54;
-  const x = Math.max(0,cx - box/2);
-  const y = Math.max(0,cy - box/2);
-  const size = Math.min(box,w-x,h-y);
+  const box = 90;
 
-  const img = ctx.getImageData(x,y,size,size);
+  const x = Math.max(0,Math.floor(cx - box/2));
+  const y = Math.max(0,Math.floor(cy - box/2));
+  const sw = Math.min(box,w - x);
+  const sh = Math.min(box,h - y);
+
+  if(sw <= 0 || sh <= 0) return false;
+
+  const img = ctx.getImageData(x,y,sw,sh);
 
   let dark = 0;
+  let veryDark = 0;
   let total = 0;
 
   for(let i=0;i<img.data.length;i+=4){
@@ -152,16 +328,17 @@ function isBlackMarker(ctx,cx,cy,w,h){
     const g = img.data[i+1];
     const b = img.data[i+2];
 
-    const avg = (r+g+b)/3;
-
+    const avg = (r + g + b) / 3;
     total++;
 
-    if(avg < 70){
-      dark++;
-    }
+    if(avg < 80) dark++;
+    if(avg < 45) veryDark++;
   }
 
-  return total > 0 && (dark / total) > 0.18;
+  const darkRatio = dark / total;
+  const veryDarkRatio = veryDark / total;
+
+  return darkRatio > 0.16 || veryDarkRatio > 0.08;
 }
 
 function captureAndSend(){
@@ -181,31 +358,14 @@ function captureAndSend(){
   ctx.fillStyle = '#fff';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-
-  const targetRatio = 210 / 297;
-  const frameRatio = vw / vh;
-
-  let sx = 0;
-  let sy = 0;
-  let sw = vw;
-  let sh = vh;
-
-  if(frameRatio > targetRatio){
-    sw = vh * targetRatio;
-    sx = (vw - sw) / 2;
-  }else{
-    sh = vw / targetRatio;
-    sy = (vh - sh) / 2;
-  }
+  const crop = getPaperGuideCropFromVideo();
 
   ctx.drawImage(
     video,
-    sx,
-    sy,
-    sw,
-    sh,
+    crop.sx,
+    crop.sy,
+    crop.sw,
+    crop.sh,
     0,
     0,
     canvas.width,
@@ -213,9 +373,28 @@ function captureAndSend(){
   );
 
   document.getElementById('scanImageInput').value =
-    canvas.toDataURL('image/jpeg',0.92);
+    canvas.toDataURL('image/jpeg',0.94);
 
   document.getElementById('sendForm').submit();
+}
+
+function getPaperGuideCropFromVideo(){
+  const video = document.getElementById('video');
+  const guide = document.getElementById('paperGuide');
+  const videoRect = video.getBoundingClientRect();
+  const guideRect = guide.getBoundingClientRect();
+
+  let sx = (guideRect.left - videoRect.left) / videoRect.width * video.videoWidth;
+  let sy = (guideRect.top - videoRect.top) / videoRect.height * video.videoHeight;
+  let sw = guideRect.width / videoRect.width * video.videoWidth;
+  let sh = guideRect.height / videoRect.height * video.videoHeight;
+
+  sx = Math.max(0,Math.floor(sx));
+  sy = Math.max(0,Math.floor(sy));
+  sw = Math.min(video.videoWidth - sx,Math.floor(sw));
+  sh = Math.min(video.videoHeight - sy,Math.floor(sh));
+
+  return {sx:sx,sy:sy,sw:sw,sh:sh};
 }
 
 startCamera();
